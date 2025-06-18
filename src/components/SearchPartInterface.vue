@@ -332,6 +332,8 @@ const toggleLectureDetail = (lecture: LectureDocumentVO) => {
 
 .lecture-preview p {
   margin: 0; /* 移除 p 元素的默认外边距 */
+  white-space: pre-wrap; /* 推荐使用这个，保留换行符并允许自动换行 */
+  word-break: break-word; /* 确保长单词也能正常换行，防止溢出 */
 }
 
 .read-more-toggle {
