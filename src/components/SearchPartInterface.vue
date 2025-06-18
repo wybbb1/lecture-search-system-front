@@ -19,45 +19,53 @@
       <h2>搜索结果：</h2>
       <ul class="result-list">
         <li v-for="lecture in searchResults" :key="lecture.id" class="result-item">
-          <a href="#" @click.prevent="viewLectureDetail(lecture.id)" class="lecture-title">
-            {{ lecture.title }}
+          <a href="#" @click.prevent="toggleLectureDetail(lecture)" class="lecture-link">
+            <h3 class="lecture-title" v-html="highlightMatches(lecture.title, query)"></h3>
+            <div
+              class="lecture-preview"
+              :class="{ 'expanded': lecture.isExpanded }"
+              :style="{ maxHeight: lecture.isExpanded ? 'none' : '60px' }"
+            >
+              <p v-html="highlightMatches(lecture.content, query)"></p>
+            </div>
+            <div class="read-more-toggle">
+              {{ lecture.isExpanded ? '收起 ▲' : '查看更多 ▼' }}
+            </div>
           </a>
         </li>
       </ul>
     </div>
 
     <div v-else-if="searched && searchResults.length === 0" class="no-results">
-      <p>没有找到相关讲座。</p>
-    </div>
-
-    <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
-      <div class="modal-content">
-        <button class="close-button" @click="closeDetailModal">X</button>
-        <h3>{{ currentLecture.title }}</h3>
-        <div class="lecture-content">
-          <p>{{ currentLecture.content }}</p>
-        </div>
+      <div class="no-results-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather feather-search-off">
+          <path d="M10 10l5 5"></path>
+          <path d="M15 10l-5 5"></path>
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
       </div>
+      <p class="no-results-message">抱歉，未能找到相关的讲座信息。</p>
+      <p class="no-results-tip">请尝试更换关键词，或缩短查询内容。</p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, reactive } from 'vue';
 import axios from 'axios';
 
-// 定义讲座文档的接口
 interface LectureDocumentVO {
   id: number;
   title: string;
-  content?: string;
+  content: string;
+  isExpanded?: boolean;
 }
 
-// 定义后端响应的接口
 interface BackendResponse {
   success: boolean;
   errorMsg: string | null;
-  data: LectureDocumentVO[] | LectureDocumentVO | null; // 修正 data 类型以同时支持数组和对象
+  data: LectureDocumentVO[] | null;
   total: number | null;
 }
 
@@ -65,8 +73,44 @@ const query = ref<string>('');
 const searchResults = ref<LectureDocumentVO[]>([]);
 const searched = ref<boolean>(false);
 
-const showDetailModal = ref<boolean>(false);
-const currentLecture = ref<LectureDocumentVO>({ id: 0, title: '', content: '' });
+/**
+ * 高亮匹配词项
+ * @param text 原始文本
+ * @param searchQuery 用户查询词
+ * @returns 带有高亮标记的 HTML 字符串
+ */
+const highlightMatches = (text: string, searchQuery: string): string => {
+  if (!searchQuery || !text) {
+    return text;
+  }
+
+  // 对查询词进行分词，考虑多个词项的情况
+  // 这里可以根据后端的分词逻辑进行更精确的分词，
+  // 简单起见，我们假设查询词是单个或多个空格分隔的词。
+  const queryTerms = searchQuery.trim().split(/\s+/).filter(term => term.length > 0);
+
+  // 如果没有有效查询词，直接返回原文本
+  if (queryTerms.length === 0) {
+    return text;
+  }
+
+  let highlightedText = text;
+  // 遍历所有查询词，进行替换
+  queryTerms.forEach(term => {
+    // 使用正则表达式进行全局和不区分大小写的替换
+    // 注意：term 可能包含特殊字符，需要转义
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escapedTerm})`, 'gi'); // 'gi' 全局、不区分大小写
+
+    // 替换匹配到的词项，用 <mark> 标签包裹
+    // <mark> 是 HTML5 语义化标签，通常用于高亮显示
+    // 也可以使用自定义的 <span> 标签，如 <span class="highlight-wave">
+    highlightedText = highlightedText.replace(regex, '<mark>$1</mark>');
+  });
+
+  return highlightedText;
+};
+
 
 /**
  * 执行搜索请求
@@ -87,14 +131,10 @@ const performSearch = async () => {
     });
 
     if (response.data.success && response.data.data) {
-      // 确保 data 是数组类型 (对于 /search 接口)
-      if (Array.isArray(response.data.data)) {
-        searchResults.value = response.data.data;
-      } else {
-        // 如果后端在搜索结果中返回单个对象而不是数组，这可能是个警告，但也兼容处理
-        console.warn("Backend search response 'data' is not an array for /search. Please check backend API.");
-        searchResults.value = [response.data.data as LectureDocumentVO];
-      }
+      searchResults.value = response.data.data.map(lecture => ({
+        ...lecture,
+        isExpanded: false
+      }));
     } else {
       console.error('搜索失败:', response.data.errorMsg);
       searchResults.value = [];
@@ -106,38 +146,42 @@ const performSearch = async () => {
 };
 
 /**
- * 查看讲座详情
- * @param id 讲座ID
+ * 切换讲座内容的展开/收起状态
+ * @param lecture 当前点击的讲座对象
  */
-const viewLectureDetail = async (id: number) => {
-  try {
-    const response = await axios.get<BackendResponse>(`http://localhost:8080/search/${id}`);
-    if (response.data.success && response.data.data) {
-      // **** 关键修改在这里 ****
-      // 后端返回的 data 应该是一个 LectureDocumentVO 对象，直接赋值
-      currentLecture.value = response.data.data as LectureDocumentVO;
-      showDetailModal.value = true;
-    } else {
-      console.error('获取讲座详情失败:', response.data.errorMsg);
-      alert('无法获取讲座详情。');
-    }
-  } catch (error) {
-    console.error('获取讲座详情请求出错:', error);
-    alert('请求讲座详情时发生错误。');
+const toggleLectureDetail = (lecture: LectureDocumentVO) => {
+  if (lecture.isExpanded === undefined) {
+    lecture.isExpanded = true;
+  } else {
+    lecture.isExpanded = !lecture.isExpanded;
   }
 };
 
-/**
- * 关闭文章详情弹窗
- */
-const closeDetailModal = () => {
-  showDetailModal.value = false;
-  currentLecture.value = { id: 0, title: '', content: '' };
-};
 </script>
 
 <style scoped>
-/* 调整 SearchPartInterface 的样式以适应 Flex 布局 */
+/* ... (现有样式，保持不变直到 .search-header 部分) ... */
+
+/* 新增高亮样式 */
+.lecture-title :deep(mark),
+.lecture-preview :deep(mark) {
+  background-color: transparent; /* 移除默认的黄色背景 */
+  text-decoration: underline wavy yellow; /* 黄色波浪线 */
+  text-decoration-thickness: 2px; /* 波浪线粗细 */
+  color: inherit; /* 保持文本颜色 */
+  padding: 0; /* 移除可能的 padding */
+}
+/* 兼容性前缀，某些旧浏览器可能需要 */
+.lecture-title :deep(mark),
+.lecture-preview :deep(mark) {
+  -webkit-text-decoration: underline wavy yellow;
+  -webkit-text-decoration-thickness: 2px;
+}
+
+
+/* ------------------------------------------------------------- */
+/* 以下为 SearchPartInterface.vue 的其余样式，保持不变 */
+/* ------------------------------------------------------------- */
 .search-container {
   display: flex;
   flex-direction: column;
@@ -230,96 +274,137 @@ const closeDetailModal = () => {
 }
 
 .result-item {
-  margin-bottom: 10px;
-  padding: 8px 0;
-  border-bottom: 1px dashed #eee;
+  margin-bottom: 20px; /* 增加列表项间距 */
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  overflow: hidden; /* 确保虚化效果在边界内 */
+  transition: box-shadow 0.2s ease;
 }
 
-.result-item:last-child {
-  border-bottom: none;
+.result-item:hover {
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
-.lecture-title {
-  color: #4f46e5;
+.lecture-link {
+  display: block; /* 使整个区域可点击 */
+  padding: 1rem 1.5rem;
   text-decoration: none;
-  font-size: 1rem;
-  font-weight: normal;
-  display: block;
-  padding: 5px 0;
+  color: inherit; /* 继承父元素颜色 */
+}
+
+/* 注意：这里的 lecture-title 样式可能被 :deep(mark) 的样式覆盖 */
+.lecture-title {
+  color: #007bff; /* 保持链接颜色 */
+  margin-top: 0;
+  margin-bottom: 0.8rem;
+  font-size: 1.1rem; /* 稍微放大标题 */
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lecture-preview {
+  position: relative;
+  overflow: hidden;
+  line-height: 1.6;
+  font-size: 0.95rem;
+  color: #555;
+  transition: max-height 0.4s ease-out; /* 高度过渡动画 */
+}
+
+/* 虚化效果 */
+.lecture-preview::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 40px; /* 虚化区域的高度 */
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 1) 100%);
+  pointer-events: none; /* 确保不影响点击 */
+  transition: opacity 0.4s ease-out;
+}
+
+/* 展开时虚化效果消失 */
+.lecture-preview.expanded::after {
+  opacity: 0;
+}
+
+.lecture-preview p {
+  margin: 0; /* 移除 p 元素的默认外边距 */
+}
+
+.read-more-toggle {
+  text-align: right;
+  margin-top: 0.8rem;
+  font-size: 0.9rem;
+  color: #007bff;
+  cursor: pointer;
   transition: color 0.2s ease;
 }
 
-.lecture-title:hover {
-  text-decoration: underline;
-  color: #7c3aed;
+.read-more-toggle:hover {
+  color: #0056b3;
 }
 
 .no-results {
-  margin-top: 20px;
-  padding: 15px;
-  background-color: #f8f8f8;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+  margin-top: 40px; /* 增加顶部间距 */
+  padding: 30px; /* 增加内边距 */
+  background-color: #ffffff; /* 纯白背景 */
+  border: 1px solid #e0e0e0; /* 更柔和的边框 */
+  border-radius: 12px; /* 更大的圆角 */
   text-align: center;
-  color: #666;
-}
-
-/* 弹窗样式保持不变 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.6);
-  display: flex;
-  justify-content: center;
+  color: #616161; /* 更柔和的文本颜色 */
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08); /* 增加阴影，使其更突出 */
+  display: flex; /* 使用 flexbox 布局内容 */
+  flex-direction: column;
   align-items: center;
-  z-index: 1000;
+  justify-content: center;
+  min-height: 200px; /* 最小高度 */
 }
 
-.modal-content {
-  background-color: white;
-  padding: 30px;
-  border-radius: 8px;
-  width: 90%;
-  max-width: 700px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-  position: relative;
-  max-height: 80vh;
-  overflow-y: auto;
+.no-results-icon {
+  margin-bottom: 20px; /* 图标下方间距 */
+  color: #9e9e9e; /* 图标颜色 */
 }
 
-.modal-content h3 {
-  margin-top: 0;
-  color: #333;
-  font-size: 24px;
-  margin-bottom: 15px;
+.no-results-icon svg {
+  width: 60px; /* 放大图标 */
+  height: 60px;
 }
 
-.lecture-content {
-  white-space: pre-wrap;
-  line-height: 1.6;
-  color: #555;
-  font-size: 15px;
+.no-results-message {
+  font-size: 1.2rem; /* 增大主提示文本 */
+  font-weight: 600; /* 加粗 */
+  color: #333; /* 更深的颜色 */
+  margin-bottom: 10px;
 }
 
-.close-button {
-  position: absolute;
-  top: 15px;
-  right: 15px;
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #888;
+.no-results-tip {
+  font-size: 0.95rem; /* 提示文本大小 */
+  color: #757575; /* 提示文本颜色 */
+  line-height: 1.5;
 }
 
-.close-button:hover {
-  color: #333;
+/* 滚动条样式 */
+.search-results::-webkit-scrollbar {
+  width: 6px;
 }
 
-/* 响应式设计 */
+.search-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.search-results::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.search-results::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 媒体查询：小屏幕下的布局调整 - 保持不变 */
 @media (max-width: 1024px) {
   .search-container {
     height: auto;
@@ -341,23 +426,5 @@ const closeDetailModal = () => {
   .search-results {
     padding: 0 1rem 0.75rem;
   }
-}
-
-/* 滚动条样式 */
-.search-results::-webkit-scrollbar {
-  width: 6px;
-}
-
-.search-results::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.search-results::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-
-.search-results::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
 }
 </style>

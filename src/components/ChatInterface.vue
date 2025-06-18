@@ -241,14 +241,6 @@ async function sendMessage() {
   isLoading.value = true
 
   try {
-    // 创建AI消息占位符
-    const aiMessageIndex = messages.length
-    messages.push({
-      type: 'ai',
-      content: '',
-      timestamp: new Date()
-    })
-
     const chatForm: ChatForm = {
       memoryId: memoryId.value,
       userMessage: userMessage
@@ -268,7 +260,14 @@ async function sendMessage() {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
-    // 处理流式响应
+    // 在确认响应成功后，再创建AI消息占位符
+    const aiMessageIndex = messages.length;
+    messages.push({
+      type: 'ai',
+      content: '',
+      timestamp: new Date()
+    });
+
     const reader = response.body?.getReader()
     if (!reader) {
       throw new Error('无法获取响应流')
@@ -276,6 +275,10 @@ async function sendMessage() {
 
     const decoder = new TextDecoder()
     let accumulatedText = ''
+
+    // 确保引用的是 messages 数组中正确的 AI 消息对象
+    // 避免在循环内部重复引用或创建
+    const aiMessageObject = messages[aiMessageIndex]; 
 
     while (true) {
       const { done, value } = await reader.read()
@@ -285,14 +288,15 @@ async function sendMessage() {
       accumulatedText += chunk
       
       // 实时更新AI消息内容（渲染markdown）
-      messages[aiMessageIndex].content = await renderMarkdown(accumulatedText)
-      scrollToBottom()
+      // 直接更新 aiMessageObject 的 content
+      aiMessageObject.content = await renderMarkdown(accumulatedText); 
+      scrollToBottom();
     }
 
   } catch (error) {
     console.error('发送消息失败:', error)
     
-    // 移除可能添加的空消息
+    // 移除可能添加的空消息 (如果之前有添加的话，这行是安全的)
     if (messages[messages.length - 1]?.content === '') {
       messages.pop()
     }

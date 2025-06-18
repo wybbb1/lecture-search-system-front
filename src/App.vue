@@ -88,16 +88,16 @@ body, html, #app {
 .ai-chat-overlay {
   position: fixed;
   /* 调整大小和位置 */
-  width: 30vw; /* 占据视口宽度的一半 */
+  width: 40vw; /* 占据视口宽度的一半 */
   height: 50vh; /* 占据视口高度的一半 */
   right: 0; /* 从右侧开始定位 */
-  top: 25vh; /* 距离顶部 1/4 视口高度 (100vh / 4) */
+  top: 40vh; /* 距离顶部 1/4 视口高度 (100vh / 4) */
   box-sizing: border-box; /* 包含 padding 和 border 在 width/height 内 */
 
   display: flex;
   justify-content: flex-end; /* ChatInterface 内容靠右 */
   align-items: center; /* 垂直居中 */
-  background-color: rgba(255, 255, 255, 0.5); /* 半透明背景 */
+  background-color: rgba(255, 255, 255, 0.6); /* 半透明背景 */
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   z-index: 100; /* 确保在 SearchPartInterface 上方 */
