@@ -15,6 +15,16 @@
       <button @click="performSearch" class="search-button">搜索</button>
     </div>
 
+    <div v-if="spellingSuggestion" class="spelling-suggestion-box">
+      <p>
+        您是不是想搜：
+        <span class="suggestion-text" @click="applySuggestion(spellingSuggestion)">
+          {{ spellingSuggestion }}
+        </span>
+        <span class="suggestion-tip"> (点击使用)</span>
+      </p>
+    </div>
+
     <div v-if="searchResults.length > 0" class="search-results">
       <h2>搜索结果：</h2>
       <ul class="result-list">
@@ -69,9 +79,17 @@ interface BackendResponse {
   total: number | null;
 }
 
+// 新增：拼写建议接口响应类型
+interface SpellingAdviceResponse {
+  success: boolean;
+  errorMsg: string | null;
+  data: string | null; // 拼写建议文本
+}
+
 const query = ref<string>('');
 const searchResults = ref<LectureDocumentVO[]>([]);
 const searched = ref<boolean>(false);
+const spellingSuggestion = ref<string | null>(null); // 新增：拼写建议
 
 /**
  * 高亮匹配词项
@@ -84,27 +102,16 @@ const highlightMatches = (text: string, searchQuery: string): string => {
     return text;
   }
 
-  // 对查询词进行分词，考虑多个词项的情况
-  // 这里可以根据后端的分词逻辑进行更精确的分词，
-  // 简单起见，我们假设查询词是单个或多个空格分隔的词。
   const queryTerms = searchQuery.trim().split(/\s+/).filter(term => term.length > 0);
 
-  // 如果没有有效查询词，直接返回原文本
   if (queryTerms.length === 0) {
     return text;
   }
 
   let highlightedText = text;
-  // 遍历所有查询词，进行替换
   queryTerms.forEach(term => {
-    // 使用正则表达式进行全局和不区分大小写的替换
-    // 注意：term 可能包含特殊字符，需要转义
     const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escapedTerm})`, 'gi'); // 'gi' 全局、不区分大小写
-
-    // 替换匹配到的词项，用 <mark> 标签包裹
-    // <mark> 是 HTML5 语义化标签，通常用于高亮显示
-    // 也可以使用自定义的 <span> 标签，如 <span class="highlight-wave">
+    const regex = new RegExp(`(${escapedTerm})`, 'gi');
     highlightedText = highlightedText.replace(regex, '<mark>$1</mark>');
   });
 
@@ -118,31 +125,65 @@ const highlightMatches = (text: string, searchQuery: string): string => {
 const performSearch = async () => {
   if (!query.value.trim()) {
     searchResults.value = [];
+    spellingSuggestion.value = null; // 清空建议
     searched.value = false;
     return;
   }
 
   searched.value = true;
-  try {
-    const response = await axios.get<BackendResponse>(`http://localhost:8080/search`, {
-      params: {
-        query: query.value
-      }
-    });
+  spellingSuggestion.value = null; // 每次搜索前清空之前的建议
 
-    if (response.data.success && response.data.data) {
-      searchResults.value = response.data.data.map(lecture => ({
-        ...lecture,
-        isExpanded: false
-      }));
-    } else {
-      console.error('搜索失败:', response.data.errorMsg);
+  const currentQuery = query.value; // 捕获当前查询值，防止在异步请求期间被修改
+
+  // 1. 发送主搜索请求并处理
+  axios.get<BackendResponse>(`http://localhost:8080/search`, {
+    params: {
+      query: currentQuery
+    }
+  })
+  .then(response => {
+    // 只有当查询值没有被用户更改时才更新UI，避免旧请求覆盖新请求
+    if (query.value === currentQuery) {
+      if (response.data.success && response.data.data) {
+        searchResults.value = response.data.data.map(lecture => ({
+          ...lecture,
+          isExpanded: false
+        }));
+      } else {
+        console.error('搜索失败:', response.data.errorMsg);
+        searchResults.value = [];
+      }
+    }
+  })
+  .catch(error => {
+    if (query.value === currentQuery) {
+      console.error('搜索请求出错:', error);
       searchResults.value = [];
     }
-  } catch (error) {
-    console.error('搜索请求出错:', error);
-    searchResults.value = [];
-  }
+  });
+
+  // 2. 发送拼写建议请求并处理 (不阻塞主搜索)
+  axios.get<SpellingAdviceResponse>(`http://localhost:8080/search/advice`, {
+    params: {
+      query: currentQuery
+    }
+  })
+  .then(response => {
+    // 只有当查询值没有被用户更改时才更新UI，避免旧请求覆盖新请求
+    if (query.value === currentQuery) {
+      if (response.data.success && response.data.data) {
+        spellingSuggestion.value = response.data.data;
+      } else {
+        spellingSuggestion.value = null;
+      }
+    }
+  })
+  .catch(error => {
+    if (query.value === currentQuery) {
+      console.error('拼写建议请求出错:', error);
+      spellingSuggestion.value = null;
+    }
+  });
 };
 
 /**
@@ -157,6 +198,14 @@ const toggleLectureDetail = (lecture: LectureDocumentVO) => {
   }
 };
 
+/**
+ * 应用拼写建议，将建议词填充到搜索框并执行搜索
+ * @param suggestion 拼写建议词
+ */
+const applySuggestion = (suggestion: string) => {
+  query.value = suggestion;
+  performSearch();
+};
 </script>
 
 <style scoped>
@@ -254,6 +303,60 @@ const toggleLectureDetail = (lecture: LectureDocumentVO) => {
   transform: none;
   box-shadow: none;
 }
+
+/* 新增：拼写建议样式 */
+.spelling-suggestion-box {
+  padding: 0.8rem 1.5rem;
+  background-color: #fffde7; /* 淡黄色背景 */
+  border-bottom: 1px solid #ffe082; /* 底部边框 */
+  color: #616161;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* 文本居中 */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  margin: 0 1.5rem; /* 与搜索框对齐，但左右留白 */
+  border-radius: 8px; /* 圆角 */
+  margin-top: -0.5rem; /* 向上微调，更靠近搜索框 */
+  animation: fadeInDown 0.3s ease-out; /* 淡入动画 */
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.spelling-suggestion-box p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.suggestion-text {
+  color: #007bff;
+  font-weight: bold;
+  cursor: pointer;
+  text-decoration: underline;
+  margin-left: 0.5em;
+  transition: color 0.2s ease;
+}
+
+.suggestion-text:hover {
+  color: #0056b3;
+}
+
+.suggestion-tip {
+  font-size: 0.85rem;
+  color: #9e9e9e;
+  margin-left: 0.5em;
+}
+
 
 .search-results {
   flex: 1;
