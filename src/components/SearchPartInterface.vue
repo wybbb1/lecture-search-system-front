@@ -5,6 +5,11 @@
     </header>
 
     <div class="search-input-group">
+      <CustomSelect
+        v-model="searchType"
+        :options="searchTypeOptions"
+        class="custom-select-wrapper-in-group"
+      />
       <input
         type="text"
         v-model="query"
@@ -64,6 +69,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
 import axios from 'axios';
+import CustomSelect from './CustomSelect.vue'; // 导入 CustomSelect 组件
 
 interface LectureDocumentVO {
   id: number;
@@ -79,17 +85,25 @@ interface BackendResponse {
   total: number | null;
 }
 
-// 新增：拼写建议接口响应类型
 interface SpellingAdviceResponse {
   success: boolean;
   errorMsg: string | null;
-  data: string | null; // 拼写建议文本
+  data: string | null;
 }
 
 const query = ref<string>('');
+const searchType = ref<number>(0); // 搜索类型，默认为0 (全文搜索)
+
+// 定义 CustomSelect 的选项数据
+const searchTypeOptions = [
+  { value: 0, label: '全文搜索' },
+  { value: 1, label: '标题搜索' },
+  { value: 2, label: '讲师搜索' },
+];
+
 const searchResults = ref<LectureDocumentVO[]>([]);
 const searched = ref<boolean>(false);
-const spellingSuggestion = ref<string | null>(null); // 新增：拼写建议
+const spellingSuggestion = ref<string | null>(null);
 
 /**
  * 高亮匹配词项
@@ -118,32 +132,33 @@ const highlightMatches = (text: string, searchQuery: string): string => {
   return highlightedText;
 };
 
-
 /**
  * 执行搜索请求
  */
 const performSearch = async () => {
   if (!query.value.trim()) {
     searchResults.value = [];
-    spellingSuggestion.value = null; // 清空建议
+    spellingSuggestion.value = null;
     searched.value = false;
     return;
   }
 
   searched.value = true;
-  spellingSuggestion.value = null; // 每次搜索前清空之前的建议
+  spellingSuggestion.value = null;
 
-  const currentQuery = query.value; // 捕获当前查询值，防止在异步请求期间被修改
+  const currentQuery = query.value;
+  const currentSearchType = searchType.value; // 捕获当前搜索类型
 
-  // 1. 发送主搜索请求并处理
+  // 1. 发送主搜索请求并立即处理其结果
   axios.get<BackendResponse>(`http://localhost:8080/search`, {
     params: {
-      query: currentQuery
+      query: currentQuery,
+      type: currentSearchType // 传递 type 参数
     }
   })
   .then(response => {
-    // 只有当查询值没有被用户更改时才更新UI，避免旧请求覆盖新请求
-    if (query.value === currentQuery) {
+    // 检查当前 query.value 和 searchType.value 是否与发起请求时相同
+    if (query.value === currentQuery && searchType.value === currentSearchType) {
       if (response.data.success && response.data.data) {
         searchResults.value = response.data.data.map(lecture => ({
           ...lecture,
@@ -156,21 +171,21 @@ const performSearch = async () => {
     }
   })
   .catch(error => {
-    if (query.value === currentQuery) {
+    if (query.value === currentQuery && searchType.value === currentSearchType) {
       console.error('搜索请求出错:', error);
       searchResults.value = [];
     }
   });
 
-  // 2. 发送拼写建议请求并处理 (不阻塞主搜索)
+  // 2. 发送拼写建议请求并立即处理其结果 (不阻塞主搜索)
+  // 拼写建议通常只针对查询字符串，不依赖搜索类型
   axios.get<SpellingAdviceResponse>(`http://localhost:8080/search/advice`, {
     params: {
       query: currentQuery
     }
   })
   .then(response => {
-    // 只有当查询值没有被用户更改时才更新UI，避免旧请求覆盖新请求
-    if (query.value === currentQuery) {
+    if (query.value === currentQuery) { // 拼写建议只需检查 query 是否一致
       if (response.data.success && response.data.data) {
         spellingSuggestion.value = response.data.data;
       } else {
@@ -209,8 +224,6 @@ const applySuggestion = (suggestion: string) => {
 </script>
 
 <style scoped>
-/* ... (现有样式，保持不变直到 .search-header 部分) ... */
-
 /* 新增高亮样式 */
 .lecture-title :deep(mark),
 .lecture-preview :deep(mark) {
@@ -227,26 +240,25 @@ const applySuggestion = (suggestion: string) => {
   -webkit-text-decoration-thickness: 2px;
 }
 
-
 /* ------------------------------------------------------------- */
 /* 以下为 SearchPartInterface.vue 的其余样式，保持不变 */
 /* ------------------------------------------------------------- */
 .search-container {
   display: flex;
   flex-direction: column;
-  height: 100%; /* 占满父容器（right-panel）的高度 */
-  width: 100%; /* 占满父容器的宽度 */
+  height: 100%;
+  width: 100%;
   background: #f8fafc;
   padding: 0;
-  overflow: hidden; /* 防止内容溢出 */
+  overflow: hidden;
 }
 
 .search-header {
   display: flex;
-  justify-content: center; /* 标题居中 */
+  justify-content: center;
   align-items: center;
   padding: 1rem 1.5rem;
-  background: linear-gradient(135deg, #4CAF50 0%, #8BC34A 100%); /* 不同的渐变色 */
+  background: linear-gradient(135deg, #4CAF50 0%, #8BC34A 100%);
   color: white;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
@@ -260,9 +272,20 @@ const applySuggestion = (suggestion: string) => {
 
 .search-input-group {
   display: flex;
-  padding: 1rem 1.5rem; /* 增加 padding */
+  padding: 1rem 1.5rem;
   flex-shrink: 0;
+  align-items: center; /* 垂直居中对齐 */
+  gap: 1rem; /* 组件之间的间距 */
 }
+
+/* 为 CustomSelect 在 SearchInputGroup 中的布局添加样式 */
+/* 注意：这里的样式是针对 CustomSelect 的外层容器 .custom-select-wrapper */
+.custom-select-wrapper-in-group {
+  /* 可以选择不设置特定宽度，让其内容决定宽度 */
+  /* 或者设置一个最小宽度 / 最大宽度 */
+  min-width: 120px; /* 示例：给定一个最小宽度 */
+}
+
 
 .search-input {
   flex-grow: 1;
@@ -286,7 +309,6 @@ const applySuggestion = (suggestion: string) => {
   border-radius: 28px;
   cursor: pointer;
   font-size: 1rem;
-  margin-left: 1rem;
   transition: all 0.2s ease;
   flex-shrink: 0;
 }
@@ -304,21 +326,21 @@ const applySuggestion = (suggestion: string) => {
   box-shadow: none;
 }
 
-/* 新增：拼写建议样式 */
+/* 拼写建议样式 */
 .spelling-suggestion-box {
   padding: 0.8rem 1.5rem;
-  background-color: #fffde7; /* 淡黄色背景 */
-  border-bottom: 1px solid #ffe082; /* 底部边框 */
+  background-color: #fffde7;
+  border-bottom: 1px solid #ffe082;
   color: #616161;
   font-size: 0.95rem;
   display: flex;
   align-items: center;
-  justify-content: center; /* 文本居中 */
+  justify-content: center;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-  margin: 0 1.5rem; /* 与搜索框对齐，但左右留白 */
-  border-radius: 8px; /* 圆角 */
-  margin-top: -0.5rem; /* 向上微调，更靠近搜索框 */
-  animation: fadeInDown 0.3s ease-out; /* 淡入动画 */
+  margin: 0 1.5rem;
+  border-radius: 8px;
+  margin-top: 0.5rem; /* 调整间距 */
+  animation: fadeInDown 0.3s ease-out;
 }
 
 @keyframes fadeInDown {
@@ -357,7 +379,6 @@ const applySuggestion = (suggestion: string) => {
   margin-left: 0.5em;
 }
 
-
 .search-results {
   flex: 1;
   overflow-y: auto;
@@ -377,11 +398,11 @@ const applySuggestion = (suggestion: string) => {
 }
 
 .result-item {
-  margin-bottom: 20px; /* 增加列表项间距 */
+  margin-bottom: 20px;
   background-color: white;
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-  overflow: hidden; /* 确保虚化效果在边界内 */
+  overflow: hidden;
   transition: box-shadow 0.2s ease;
 }
 
@@ -390,18 +411,17 @@ const applySuggestion = (suggestion: string) => {
 }
 
 .lecture-link {
-  display: block; /* 使整个区域可点击 */
+  display: block;
   padding: 1rem 1.5rem;
   text-decoration: none;
-  color: inherit; /* 继承父元素颜色 */
+  color: inherit;
 }
 
-/* 注意：这里的 lecture-title 样式可能被 :deep(mark) 的样式覆盖 */
 .lecture-title {
-  color: #007bff; /* 保持链接颜色 */
+  color: #007bff;
   margin-top: 0;
   margin-bottom: 0.8rem;
-  font-size: 1.1rem; /* 稍微放大标题 */
+  font-size: 1.1rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -412,31 +432,29 @@ const applySuggestion = (suggestion: string) => {
   line-height: 1.6;
   font-size: 0.95rem;
   color: #555;
-  transition: max-height 0.4s ease-out; /* 高度过渡动画 */
+  transition: max-height 0.4s ease-out;
 }
 
-/* 虚化效果 */
 .lecture-preview::after {
   content: '';
   position: absolute;
   bottom: 0;
   left: 0;
   width: 100%;
-  height: 40px; /* 虚化区域的高度 */
+  height: 40px;
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 1) 100%);
-  pointer-events: none; /* 确保不影响点击 */
+  pointer-events: none;
   transition: opacity 0.4s ease-out;
 }
 
-/* 展开时虚化效果消失 */
 .lecture-preview.expanded::after {
   opacity: 0;
 }
 
 .lecture-preview p {
-  margin: 0; /* 移除 p 元素的默认外边距 */
-  white-space: pre-wrap; /* 推荐使用这个，保留换行符并允许自动换行 */
-  word-break: break-word; /* 确保长单词也能正常换行，防止溢出 */
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .read-more-toggle {
@@ -453,41 +471,41 @@ const applySuggestion = (suggestion: string) => {
 }
 
 .no-results {
-  margin-top: 40px; /* 增加顶部间距 */
-  padding: 30px; /* 增加内边距 */
-  background-color: #ffffff; /* 纯白背景 */
-  border: 1px solid #e0e0e0; /* 更柔和的边框 */
-  border-radius: 12px; /* 更大的圆角 */
+  margin-top: 40px;
+  padding: 30px;
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
   text-align: center;
-  color: #616161; /* 更柔和的文本颜色 */
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08); /* 增加阴影，使其更突出 */
-  display: flex; /* 使用 flexbox 布局内容 */
+  color: #616161;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 200px; /* 最小高度 */
+  min-height: 200px;
 }
 
 .no-results-icon {
-  margin-bottom: 20px; /* 图标下方间距 */
-  color: #9e9e9e; /* 图标颜色 */
+  margin-bottom: 20px;
+  color: #9e9e9e;
 }
 
 .no-results-icon svg {
-  width: 60px; /* 放大图标 */
+  width: 60px;
   height: 60px;
 }
 
 .no-results-message {
-  font-size: 1.2rem; /* 增大主提示文本 */
-  font-weight: 600; /* 加粗 */
-  color: #333; /* 更深的颜色 */
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #333;
   margin-bottom: 10px;
 }
 
 .no-results-tip {
-  font-size: 0.95rem; /* 提示文本大小 */
-  color: #757575; /* 提示文本颜色 */
+  font-size: 0.95rem;
+  color: #757575;
   line-height: 1.5;
 }
 
@@ -509,7 +527,7 @@ const applySuggestion = (suggestion: string) => {
   background: #94a3b8;
 }
 
-/* 媒体查询：小屏幕下的布局调整 - 保持不变 */
+/* 媒体查询：小屏幕下的布局调整 */
 @media (max-width: 1024px) {
   .search-container {
     height: auto;
@@ -526,6 +544,24 @@ const applySuggestion = (suggestion: string) => {
 
   .search-input-group {
     padding: 0.75rem 1rem;
+    flex-direction: column; /* 小屏幕下堆叠 */
+    align-items: stretch; /* 填充宽度 */
+  }
+
+  /* CustomSelect 在小屏幕下也应占据全宽 */
+  .custom-select-wrapper-in-group {
+    width: 100%;
+    margin-bottom: 0.5rem; /* 下拉框下方间距 */
+  }
+
+  .search-input {
+    width: 100%; /* 小屏幕下宽度占满 */
+    margin-bottom: 0.5rem; /* 输入框下方间距 */
+  }
+
+  .search-button {
+    width: 100%; /* 小屏幕下宽度占满 */
+    margin-left: 0; /* 移除左侧间距 */
   }
 
   .search-results {
