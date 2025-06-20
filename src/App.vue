@@ -89,9 +89,9 @@ body, html, #app {
   position: fixed;
   /* 调整大小和位置 */
   width: 40vw; /* 占据视口宽度的一半 */
-  height: 60vh; /* 占据视口高度的一半 */
+  height: 80vh; /* 占据视口高度的一半 */
   right: 0; /* 从右侧开始定位 */
-  top: 40vh; /* 距离顶部 1/4 视口高度 (100vh / 4) */
+  top: 20vh; /* 距离顶部 1/4 视口高度 (100vh / 4) */
   box-sizing: border-box; /* 包含 padding 和 border 在 width/height 内 */
 
   display: flex;
